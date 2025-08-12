@@ -3,6 +3,7 @@ from db import farmers_col, crops_col, quotes_col
 from cpq import calculate_price
 from datetime import datetime
 
+
 @click.group()
 def cli():
     pass
@@ -80,6 +81,14 @@ def get_quote():
     quotes_col.insert_one(quote)
 
     click.echo(f"Quote for {crop_count} '{crop_name}' crops: ₹{final_price:.2f} (Discount Applied: {discount}%)")
+from utils import parse_discount_rules, format_currency
+discount_rules = parse_discount_rules("2:5,3:10")
+print(discount_rules)
+# Output: [{'min_crops': 2, 'discount_percent': 5}, {'min_crops': 3, 'discount_percent': 10}]
+
+price_str = format_currency(12345.678)
+print(price_str)
+# Output: ₹12,345.68   
 
 if __name__ == "__main__":
     cli()
