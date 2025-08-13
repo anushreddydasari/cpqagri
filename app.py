@@ -2,13 +2,11 @@ import streamlit as st
 from db import farmers_col, crops_col, quotes_col
 from cpq import calculate_price
 from datetime import datetime
-from utils import render_template_to_html
+from utils import render_template_to_html, render_quote_to_pdf, render_lease_to_pdf
 from uuid import uuid4
+from manage_data import render_manage_data
 
 st.title("CPQ Agri Application")
-
-menu = ["Add Farmer", "Add Crop", "Get Quote", "Lease Agreement PDF"]
-choice = st.sidebar.selectbox("Select Action", menu)
 
 
 def _suggest_base_price(crop_name: str, farmer_id):
@@ -35,10 +33,10 @@ def _suggest_base_price(crop_name: str, farmer_id):
         pass
     return None
 
-if choice == "Add Farmer":
+def page_add_farmer():
     st.header("Add a New Farmer")
-    farmer_name = st.text_input("Farmer Name")
-    if st.button("Add Farmer"):
+    farmer_name = st.text_input("Farmer Name", key="farmer_name_input")
+    if st.button("Add Farmer", key="add_farmer_btn"):
         if not farmer_name:
             st.error("Please enter farmer name")
         else:
@@ -49,58 +47,56 @@ if choice == "Add Farmer":
                 farmers_col.insert_one({"name": farmer_name})
                 st.success(f"Farmer '{farmer_name}' added successfully!")
 
-elif choice == "Add Crop":
+def page_add_crop():
     st.header("Add Crop for Farmer")
 
-    # Get list of farmers for dropdown
     farmers = list(farmers_col.find({}, {"name": 1}))
     farmer_names = [f.get('name') for f in farmers if f.get('name')]
 
     if not farmer_names:
         st.warning("No farmers found! Please add a farmer first.")
-    else:
-        selected_farmer = st.selectbox("Select Farmer", farmer_names)
-        crop_name = st.text_input("Crop Name")
-        # Suggest base price when crop name changes
-        if "_last_crop_name" not in st.session_state:
-            st.session_state._last_crop_name = ""
-        if crop_name and crop_name != st.session_state._last_crop_name:
-            st.session_state._last_crop_name = crop_name
+        return
+
+    selected_farmer = st.selectbox("Select Farmer", farmer_names, key="add_crop_farmer")
+    crop_name = st.text_input("Crop Name", key="crop_name_input")
+    if "_last_crop_name" not in st.session_state:
+        st.session_state._last_crop_name = ""
+    if crop_name and crop_name != st.session_state._last_crop_name:
+        st.session_state._last_crop_name = crop_name
+        farmer = farmers_col.find_one({"name": selected_farmer})
+        suggestion = _suggest_base_price(crop_name, farmer["_id"]) if farmer else None
+        if suggestion is not None:
+            st.session_state._base_price_suggestion = float(suggestion)
+    default_base = st.session_state.get("_base_price_suggestion", 0.0)
+    base_price = st.number_input("Base Price (₹)", min_value=0.0, format="%.2f", value=float(default_base), key="base_price_input")
+    if st.session_state.get("_base_price_suggestion"):
+        st.caption(f"Suggested from history: ₹{st.session_state._base_price_suggestion:,.2f} (editable)")
+    discounts = st.text_input("Discounts (e.g. 2:5,3:10)", key="discounts_input")
+
+    if st.button("Add Crop", key="add_crop_btn"):
+        if not crop_name:
+            st.error("Please enter crop name")
+        else:
+            discount_rules = []
+            if discounts:
+                parts = discounts.split(',')
+                for part in parts:
+                    try:
+                        min_crops, disc = part.split(':')
+                        discount_rules.append({"min_crops": int(min_crops), "discount_percent": float(disc)})
+                    except Exception:
+                        st.warning(f"Ignored invalid discount format: {part}")
+
             farmer = farmers_col.find_one({"name": selected_farmer})
-            suggestion = _suggest_base_price(crop_name, farmer["_id"]) if farmer else None
-            if suggestion is not None:
-                st.session_state._base_price_suggestion = float(suggestion)
-        # Use suggestion if available; user can overwrite
-        default_base = st.session_state.get("_base_price_suggestion", 0.0)
-        base_price = st.number_input("Base Price (₹)", min_value=0.0, format="%.2f", value=float(default_base))
-        if st.session_state.get("_base_price_suggestion"):
-            st.caption(f"Suggested from history: ₹{st.session_state._base_price_suggestion:,.2f} (editable)")
-        discounts = st.text_input("Discounts (e.g. 2:5,3:10)")
+            crops_col.insert_one({
+                "farmer_id": farmer["_id"],
+                "name": crop_name,
+                "base_price": base_price,
+                "discount_rules": discount_rules
+            })
+            st.success(f"Crop '{crop_name}' added for farmer '{selected_farmer}'.")
 
-        if st.button("Add Crop"):
-            if not crop_name:
-                st.error("Please enter crop name")
-            else:
-                discount_rules = []
-                if discounts:
-                    parts = discounts.split(',')
-                    for part in parts:
-                        try:
-                            min_crops, disc = part.split(':')
-                            discount_rules.append({"min_crops": int(min_crops), "discount_percent": float(disc)})
-                        except Exception:
-                            st.warning(f"Ignored invalid discount format: {part}")
-
-                farmer = farmers_col.find_one({"name": selected_farmer})
-                crops_col.insert_one({
-                    "farmer_id": farmer["_id"],
-                    "name": crop_name,
-                    "base_price": base_price,
-                    "discount_rules": discount_rules
-                })
-                st.success(f"Crop '{crop_name}' added for farmer '{selected_farmer}'.")
-
-elif choice == "Get Quote":
+def page_get_quote():
     st.header("Get Quote")
 
     # Fetch farmers for selection
@@ -109,76 +105,93 @@ elif choice == "Get Quote":
 
     if not farmer_names:
         st.warning("No farmers found! Please add a farmer first.")
-    else:
-        selected_farmer = st.selectbox("Select Farmer", farmer_names)
-        farmer = farmers_col.find_one({"name": selected_farmer})
+        return
+    selected_farmer = st.selectbox("Select Farmer", farmer_names, key="quote_farmer")
+    farmer = farmers_col.find_one({"name": selected_farmer})
 
-        crops = list(crops_col.find({"farmer_id": farmer["_id"]}, {"name": 1}))
-        crop_names = [c.get('name') for c in crops if c.get('name')]
+    crops = list(crops_col.find({"farmer_id": farmer["_id"]}, {"name": 1}))
+    crop_names = [c.get('name') for c in crops if c.get('name')]
 
-        if not crop_names:
-            st.warning("No crops found for this farmer! Please add crops first.")
-        else:
-            selected_crop = st.selectbox("Select Crop", crop_names)
-            crop = crops_col.find_one({"farmer_id": farmer["_id"], "name": selected_crop})
+    if not crop_names:
+        st.warning("No crops found for this farmer! Please add crops first.")
+        return
+    selected_crop = st.selectbox("Select Crop", crop_names, key="quote_crop")
+    crop = crops_col.find_one({"farmer_id": farmer["_id"], "name": selected_crop})
 
-            crop_count = st.number_input("Enter Crop Count", min_value=1, step=1)
+    crop_count = st.number_input("Enter Crop Count", min_value=1, step=1)
 
-            buyer_name = st.text_input("Buyer Name (for PDF)")
-            valid_until = st.date_input("Valid Until (for PDF)")
+    buyer_name = st.text_input("Buyer Name (for PDF)")
+    valid_until = st.date_input("Valid Until (for PDF)")
 
-            if st.button("Calculate Quote"):
-                final_price, discount = calculate_price(crop["base_price"], crop_count, crop.get("discount_rules", []))
+    if st.button("Calculate Quote", key="calc_quote_btn"):
+        final_price, discount = calculate_price(crop["base_price"], crop_count, crop.get("discount_rules", []))
 
-                # Save quote in DB
-                quote = {
-                    "farmer_id": farmer["_id"],
-                    "crop_name": selected_crop,
-                    "crop_count": crop_count,
-                    "final_price": final_price,
-                    "discount_percent": discount,
-                    "created_at": datetime.utcnow()
-                }
-                quotes_col.insert_one(quote)
+        # Save quote in DB
+        quote = {
+            "farmer_id": farmer["_id"],
+            "crop_name": selected_crop,
+            "crop_count": crop_count,
+            "final_price": final_price,
+            "discount_percent": discount,
+            "created_at": datetime.utcnow()
+        }
+        quotes_col.insert_one(quote)
 
-                st.success(f"Quote for {crop_count} '{selected_crop}' crops: ₹{final_price:.2f} (Discount Applied: {discount}%)")
+        st.success(f"Quote for {crop_count} '{selected_crop}' crops: ₹{final_price:.2f} (Discount Applied: {discount}%)")
 
-                # Prepare PDF context and provide download
-                from uuid import uuid4
-                import tempfile, os
-                quote_id = f"Q-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid4())[:6].upper()}"
-                breakdown = [{
-                    "name": selected_crop,
-                    "quantity": crop_count,
-                    "base": float(crop["base_price"]),
-                    "discount_percent": float(discount),
-                    "discount_amount": float((crop["base_price"] * crop_count) - final_price),
-                    "final": float(final_price)
-                }]
-                total_base = float(crop["base_price"] * crop_count)
-                total_discount = float(total_base - final_price)
-                total_final = float(final_price)
-                context = {
-                    "quote_id": quote_id,
-                    "date": datetime.utcnow().date().isoformat(),
-                    "farmer": selected_farmer,
-                    "buyer": buyer_name or "",
-                    "breakdown": breakdown,
-                    "total_base": f"{total_base:,.2f}",
-                    "total_discount": f"{total_discount:,.2f}",
-                    "total_final": f"{total_final:,.2f}",
-                    "valid_until": valid_until.isoformat()
-                }
+        # Prepare PDF context and provide download
+        from uuid import uuid4
+        import tempfile, os
+        quote_id = f"Q-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid4())[:6].upper()}"
+        breakdown = [{
+            "name": selected_crop,
+            "quantity": crop_count,
+            "base": float(crop["base_price"]),
+            "discount_percent": float(discount),
+            "discount_amount": float((crop["base_price"] * crop_count) - final_price),
+            "final": float(final_price)
+        }]
+        total_base = float(crop["base_price"] * crop_count)
+        total_discount = float(total_base - final_price)
+        total_final = float(final_price)
+        context = {
+            "quote_id": quote_id,
+            "date": datetime.utcnow().date().isoformat(),
+            "farmer": selected_farmer,
+            "buyer": buyer_name or "",
+            "breakdown": breakdown,
+            "total_base": f"{total_base:,.2f}",
+            "total_discount": f"{total_discount:,.2f}",
+            "total_final": f"{total_final:,.2f}",
+            "valid_until": valid_until.isoformat()
+        }
 
-                html_str = render_template_to_html('quote.html', context)
-                st.download_button(
-                    label="Download Quote (HTML)",
-                    data=html_str,
-                    file_name=f"{quote_id}.html",
-                    mime="text/html"
-                )
+        # Offer both PDF and HTML
+        try:
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                pdf_path = tmp.name
+            render_quote_to_pdf(context, pdf_path)
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            os.unlink(pdf_path)
+            st.download_button(
+                label="Download Quote (PDF)",
+                data=pdf_bytes,
+                file_name=f"{quote_id}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.warning(f"PDF unavailable: {e}")
+        html_str = render_template_to_html('quote.html', context)
+        st.download_button(
+            label="Download Quote (HTML)",
+            data=html_str,
+            file_name=f"{quote_id}.html",
+            mime="text/html"
+        )
 
-elif choice == "Lease Agreement PDF":
+def page_lease():
     st.header("Generate Lease Agreement (PDF)")
 
     st.subheader("Parties")
@@ -254,7 +267,7 @@ elif choice == "Lease Agreement PDF":
 
     signature_date = st.date_input("Signature Date")
 
-    if st.button("Generate Document"):
+    if st.button("Generate Document", key="lease_generate_btn"):
         agreement_id = f"LEASE-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid4())[:6].upper()}"
         crops_list = []
         if crops_raw:
@@ -321,6 +334,23 @@ elif choice == "Lease Agreement PDF":
             "signature_date": signature_date.isoformat(),
         }
 
+        # Offer both PDF and HTML
+        try:
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                pdf_path = tmp.name
+            render_lease_to_pdf(context, pdf_path)
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            os.unlink(pdf_path)
+            st.download_button(
+                label="Download Lease Agreement (PDF)",
+                data=pdf_bytes,
+                file_name=f"{agreement_id}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.warning(f"PDF unavailable: {e}")
         html_str = render_template_to_html('lease.html', context)
         st.download_button(
             label="Download Lease Agreement (HTML)",
@@ -328,3 +358,15 @@ elif choice == "Lease Agreement PDF":
             file_name=f"{agreement_id}.html",
             mime="text/html"
         )
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Add Farmer", "Add Crop", "Get Quote", "Lease Agreement", "Manage Data"])
+with tab1:
+    page_add_farmer()
+with tab2:
+    page_add_crop()
+with tab3:
+    page_get_quote()
+with tab4:
+    page_lease()
+with tab5:
+    render_manage_data()

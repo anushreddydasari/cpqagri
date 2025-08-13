@@ -6,3 +6,4 @@ python-multipart
 python-dotenv
 jinja2
 weasyprint
+fpdf2
