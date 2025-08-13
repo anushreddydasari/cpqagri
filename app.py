@@ -2,7 +2,12 @@ import streamlit as st
 from db import farmers_col, crops_col, quotes_col
 from cpq import calculate_price
 from datetime import datetime
-from utils import render_template_to_html, render_quote_to_pdf, render_lease_to_pdf
+from utils import (
+    render_template_to_html,
+    render_quote_to_pdf,
+    render_lease_to_pdf,
+)
+from email_utils import send_pdf_via_gmail, send_gmail_pdf_env
 from uuid import uuid4
 from manage_data import render_manage_data
 
@@ -122,6 +127,11 @@ def page_get_quote():
 
     buyer_name = st.text_input("Buyer Name (for PDF)")
     valid_until = st.date_input("Valid Until (for PDF)")
+    seller_email = st.text_input("Seller Email (optional)")
+    buyer_email = st.text_input("Buyer Email (optional)")
+    gmail_user = st.text_input("Gmail Address (for sending)")
+    gmail_app_pw = st.text_input("Gmail App Password", type="password")
+    use_env = st.checkbox("Use env vars (GMAIL_USER/GMAIL_APP_PW)", value=False)
 
     if st.button("Calculate Quote", key="calc_quote_btn"):
         final_price, discount = calculate_price(crop["base_price"], crop_count, crop.get("discount_rules", []))
@@ -133,6 +143,8 @@ def page_get_quote():
             "crop_count": crop_count,
             "final_price": final_price,
             "discount_percent": discount,
+            "seller_email": seller_email or None,
+            "buyer_email": buyer_email or None,
             "created_at": datetime.utcnow()
         }
         quotes_col.insert_one(quote)
@@ -181,6 +193,34 @@ def page_get_quote():
                 file_name=f"{quote_id}.pdf",
                 mime="application/pdf"
             )
+            # Send email if credentials and recipients provided
+            if (use_env or (gmail_user and gmail_app_pw)) and (seller_email or buyer_email):
+                try:
+                    recipients = [e for e in [seller_email, buyer_email] if e]
+                    signing_base = "http://localhost:5001/sign-form"
+                    seller_link = f"{signing_base}?quote_id={quote_id}&role=seller"
+                    buyer_link = f"{signing_base}?quote_id={quote_id}&role=buyer"
+                    email_body = (
+                        "Please find attached the quote PDF.\n"
+                        f"Seller sign: {seller_link}\n"
+                        f"Buyer sign: {buyer_link}\n"
+                    )
+                    if use_env:
+                        send_gmail_pdf_env(recipients, f"Quote {quote_id}", email_body, pdf_bytes, f"{quote_id}.pdf")
+                    else:
+                        send_pdf_via_gmail(
+                            gmail_user,
+                            gmail_app_pw,
+                            recipients,
+                            subject=f"Quote {quote_id}",
+                            body=email_body,
+                            pdf_bytes=pdf_bytes,
+                            filename=f"{quote_id}.pdf",
+                        )
+                    st.success("Email sent.")
+                except Exception as mail_err:
+                    st.warning(f"Email failed: {mail_err}")
+            
         except Exception as e:
             st.warning(f"PDF unavailable: {e}")
         html_str = render_template_to_html('quote.html', context)
@@ -190,6 +230,8 @@ def page_get_quote():
             file_name=f"{quote_id}.html",
             mime="text/html"
         )
+
+        
 
 def page_lease():
     st.header("Generate Lease Agreement (PDF)")

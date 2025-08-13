@@ -47,6 +47,7 @@ def render_lease_to_pdf(context: dict, output_pdf_path: str) -> str:
 def render_quote_to_pdf(context: dict, output_pdf_path: str) -> str:
     """Generate a simple quote PDF using FPDF (no external system deps)."""
     from fpdf import FPDF
+    import tempfile, os
 
     pdf = FPDF(format='A4', unit='mm')
     pdf.add_page()
@@ -108,6 +109,8 @@ def render_quote_to_pdf(context: dict, output_pdf_path: str) -> str:
     pdf.set_font('UNI' if unicode_font_loaded else 'Arial', '', 10)
     pdf.cell(0, 6, f"Valid until: {context.get('valid_until','')}", ln=1, align='R')
 
+    # (signature embedding removed by request)
+
     pdf.output(output_pdf_path)
     return output_pdf_path
 
@@ -157,3 +160,30 @@ def render_template_to_html(template_name: str, context: dict) -> str:
     )
     template = env.get_template(template_name)
     return template.render(**context)
+
+
+def send_email_with_attachment(smtp_user: str, app_password: str, to_emails: list, subject: str, body: str, attachment_bytes: bytes, filename: str) -> None:
+    """Send an email with a PDF attachment via Gmail SMTP (requires app password)."""
+    import smtplib
+    from email.message import EmailMessage
+
+    message = EmailMessage()
+    message["From"] = smtp_user
+    message["To"] = ", ".join([e for e in to_emails if e])
+    message["Subject"] = subject
+    message.set_content(body)
+    message.add_attachment(attachment_bytes, maintype="application", subtype="pdf", filename=filename)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(smtp_user, app_password)
+        smtp.send_message(message)
+
+
+def save_bytes_to_gridfs(data: bytes, filename: str, metadata: dict | None = None):
+    """Save raw bytes to MongoDB GridFS and return the file id."""
+    from gridfs import GridFS
+    from db import db
+
+    fs = GridFS(db)
+    file_id = fs.put(data, filename=filename, metadata=metadata or {})
+    return file_id

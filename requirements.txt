@@ -7,3 +7,8 @@ python-dotenv
 jinja2
 weasyprint
 fpdf2
+gridfs
+Flask
+pypdf
+Pillow
+pymupdf
