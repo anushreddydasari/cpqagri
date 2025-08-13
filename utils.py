@@ -109,7 +109,32 @@ def render_quote_to_pdf(context: dict, output_pdf_path: str) -> str:
     pdf.set_font('UNI' if unicode_font_loaded else 'Arial', '', 10)
     pdf.cell(0, 6, f"Valid until: {context.get('valid_until','')}", ln=1, align='R')
 
-    # (signature embedding removed by request)
+    # Signature placeholders (buyer left, seller right)
+    pdf.ln(8)
+    pdf.set_font('UNI' if unicode_font_loaded else 'Arial', 'B', 12)
+    pdf.cell(0, 8, 'Signatures', ln=1)
+    pdf.set_font('UNI' if unicode_font_loaded else 'Arial', '', 11)
+    buyer_name = str(context.get('buyer', ''))
+    seller_name = str(context.get('farmer', ''))
+    # Labels
+    y0 = pdf.get_y()
+    pdf.text(x=20, y=y0 + 6, txt=f"Buyer: {buyer_name}")
+    pdf.text(x=120, y=y0 + 6, txt=f"Seller: {seller_name}")
+    # Signature boxes (with optional embedded links)
+    box_y = y0 + 8
+    box_w, box_h = 70, 25
+    # Draw boxes
+    pdf.rect(x=20, y=box_y, w=box_w, h=box_h)
+    pdf.rect(x=120, y=box_y, w=box_w, h=box_h)
+    pdf.set_font('UNI' if unicode_font_loaded else 'Arial', '', 9)
+    pdf.text(x=23, y=box_y + 6, txt='Sign here')
+    pdf.text(x=123, y=box_y + 6, txt='Sign here')
+    # Date labels
+    pdf.set_font('UNI' if unicode_font_loaded else 'Arial', '', 11)
+    pdf.text(x=20, y=box_y + box_h + 5, txt='Date: __________')
+    pdf.text(x=120, y=box_y + box_h + 5, txt='Date: __________')
+
+    # (confirmation links removed per request)
 
     pdf.output(output_pdf_path)
     return output_pdf_path

@@ -8,6 +8,9 @@ from utils import (
     render_lease_to_pdf,
 )
 from email_utils import send_pdf_via_gmail, send_gmail_pdf_env
+from gridfs import GridFS
+from db import db
+import os, hashlib, hmac, secrets
 from uuid import uuid4
 from manage_data import render_manage_data
 
@@ -137,6 +140,7 @@ def page_get_quote():
         final_price, discount = calculate_price(crop["base_price"], crop_count, crop.get("discount_rules", []))
 
         # Save quote in DB
+        quote_id = f"Q-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid4())[:6].upper()}"
         quote = {
             "farmer_id": farmer["_id"],
             "crop_name": selected_crop,
@@ -145,6 +149,11 @@ def page_get_quote():
             "discount_percent": discount,
             "seller_email": seller_email or None,
             "buyer_email": buyer_email or None,
+            "quote_id": quote_id,
+            # signing scaffold (token hashes will be added after PDF created)
+            "buyer": {"signed": False},
+            "seller": {"signed": False},
+            "status": "pending",
             "created_at": datetime.utcnow()
         }
         quotes_col.insert_one(quote)
@@ -152,9 +161,7 @@ def page_get_quote():
         st.success(f"Quote for {crop_count} '{selected_crop}' crops: ₹{final_price:.2f} (Discount Applied: {discount}%)")
 
         # Prepare PDF context and provide download
-        from uuid import uuid4
         import tempfile, os
-        quote_id = f"Q-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid4())[:6].upper()}"
         breakdown = [{
             "name": selected_crop,
             "quantity": crop_count,
@@ -178,6 +185,22 @@ def page_get_quote():
             "valid_until": valid_until.isoformat()
         }
 
+        # Generate per-party signing tokens and embed clickable confirm links into PDF
+        secret = os.environ.get("SIGN_SECRET", "change-me")
+        def _hash_token(t: str) -> str:
+            return hmac.new(secret.encode(), t.encode(), hashlib.sha256).hexdigest()
+        buyer_tok = secrets.token_urlsafe(24)
+        seller_tok = secrets.token_urlsafe(24)
+        quotes_col.update_one({"quote_id": quote_id}, {"$set": {
+            "buyer.token_hash": _hash_token(buyer_tok),
+            "seller.token_hash": _hash_token(seller_tok),
+        }})
+        signing_base = os.environ.get("SIGN_BASE_URL", "http://localhost:5001/sign")
+        buyer_link = f"{signing_base}/{buyer_tok}"
+        seller_link = f"{signing_base}/{seller_tok}"
+        context["buyer_confirm_link"] = buyer_link
+        context["seller_confirm_link"] = seller_link
+
         # Offer both PDF and HTML
         try:
             import tempfile, os
@@ -193,13 +216,18 @@ def page_get_quote():
                 file_name=f"{quote_id}.pdf",
                 mime="application/pdf"
             )
-            # Send email if credentials and recipients provided
+            # Save original PDF in GridFS and attach file id
+            try:
+                fs = GridFS(db)
+                original_id = fs.put(pdf_bytes, filename=f"{quote_id}.pdf", metadata={"type": "quote_original", "quote_id": quote_id})
+                quotes_col.update_one({"quote_id": quote_id}, {"$set": {"original_file_id": original_id}})
+            except Exception:
+                pass
+            # Removed GridFS storage
+            # Send email if credentials and recipients provided (include tokenized signing links)
             if (use_env or (gmail_user and gmail_app_pw)) and (seller_email or buyer_email):
                 try:
                     recipients = [e for e in [seller_email, buyer_email] if e]
-                    signing_base = "http://localhost:5001/sign-form"
-                    seller_link = f"{signing_base}?quote_id={quote_id}&role=seller"
-                    buyer_link = f"{signing_base}?quote_id={quote_id}&role=buyer"
                     email_body = (
                         "Please find attached the quote PDF.\n"
                         f"Seller sign: {seller_link}\n"
