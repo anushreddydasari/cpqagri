@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Agricultural Land Lease Agreement</title>
+  <style>
+    @page { size: A4; margin: 22mm; }
+    body { font-family: Arial, sans-serif; color: #111; }
+    h1, h2, h3 { margin: 0 0 8px; }
+    h1 { font-size: 22px; text-align: center; }
+    h2 { font-size: 16px; margin-top: 16px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    p, li, td, th { font-size: 12px; line-height: 1.45; }
+    .meta { display: flex; justify-content: space-between; margin-bottom: 10px; }
+    .box { border: 1px solid #ddd; border-radius: 6px; padding: 10px; margin: 8px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; }
+    th { background: #f7f7f7; text-align: left; }
+    .right { text-align: right; }
+    .signature-block { height: 90px; display: flex; flex-direction: column; justify-content: end; }
+    .sig-line { border-top: 1px solid #111; margin-top: 30px; padding-top: 6px; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Agricultural Land Lease Agreement</h1>
+  <div class="meta">
+    <div>Agreement ID: <strong>{{ agreement_id }}</strong></div>
+    <div>Date: <strong>{{ agreement_date }}</strong></div>
+  </div>
+
+  <h2>1) Parties</h2>
+  <div class="grid">
+    <div class="box">
+      <h3>Lessor (Land Owner)</h3>
+      <p><strong>Name:</strong> {{ lessor.name }}</p>
+      <p><strong>Address:</strong> {{ lessor.address }}</p>
+      <p><strong>Contact:</strong> {{ lessor.contact }}</p>
+      <p><strong>ID:</strong> {{ lessor.id_type }} — {{ lessor.id_number }}</p>
+    </div>
+    <div class="box">
+      <h3>Lessee (Farmer/Cultivator)</h3>
+      <p><strong>Name:</strong> {{ lessee.name }}</p>
+      <p><strong>Address:</strong> {{ lessee.address }}</p>
+      <p><strong>Contact:</strong> {{ lessee.contact }}</p>
+      <p><strong>ID:</strong> {{ lessee.id_type }} — {{ lessee.id_number }}</p>
+    </div>
+  </div>
+
+  <h2>2) Property & Term</h2>
+  <div class="box">
+    <p><strong>Location:</strong> {{ property.village }}, {{ property.taluka }}, {{ property.district }}, {{ property.state }}</p>
+    <p><strong>Survey/Plot No.:</strong> {{ property.parcel_id }}</p>
+    <p><strong>Area:</strong> {{ property.area_acres }} acres</p>
+    <p><strong>Lease Period:</strong> {{ term.start_date }} to {{ term.end_date }} ({{ term.duration_text }})</p>
+    {% if possession_date %}<p><strong>Possession/Handover:</strong> {{ possession_date }}</p>{% endif %}
+  </div>
+
+  <h2>3) Crop Details</h2>
+  <table>
+    <thead>
+      <tr><th>Crop</th><th>Variety</th><th>Season</th><th class="right">Planned Acreage</th></tr>
+    </thead>
+    <tbody>
+      {% for c in crops %}
+      <tr>
+        <td>{{ c.name }}</td>
+        <td>{{ c.variety }}</td>
+        <td>{{ c.season }}</td>
+        <td class="right">{{ c.acreage }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>4) Financial Terms</h2>
+  <table>
+    <thead>
+      <tr><th>Description</th><th class="right">Amount (₹)</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Agreed Lease Amount (Original)</td>
+        <td class="right">{{ amounts.original | round(2) }}</td>
+      </tr>
+      <tr>
+        <td>Discount ({{ amounts.discount_percent }}%)</td>
+        <td class="right">-{{ amounts.discount_amount | round(2) }}</td>
+      </tr>
+      <tr>
+        <th>Final Lease Amount (Payable)</th>
+        <th class="right">{{ amounts.final | round(2) }}</th>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Payment Schedule</h3>
+  <table>
+    <thead>
+      <tr><th>Due Date</th><th class="right">Amount (₹)</th><th>Method</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      {% for p in payment_schedule %}
+      <tr>
+        <td>{{ p.due_date }}</td>
+        <td class="right">{{ p.amount | round(2) }}</td>
+        <td>{{ p.method }}</td>
+        <td>{{ p.notes or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>5) Terms & Conditions (Cultivation)</h2>
+  <ul>
+    <li>Use of land strictly for agricultural cultivation; no construction or sub-lease without written consent.</li>
+    <li>Lessee responsible for seeds, fertilizers, labor, irrigation operations, and pest/weed management unless otherwise agreed.</li>
+    <li>Lessor to provide lawful, disturbance-free possession and access to the field boundaries and approach road.</li>
+    <li>Water/Irrigation: {{ irrigation_clause }}</li>
+    <li>Soil conservation practices to be followed; no mining, soil removal, or tree cutting without consent.</li>
+    <li>Compliance with applicable agriculture, environmental, and safety laws; only approved agrochemicals to be used.</li>
+    <li>Lessee liable for damages caused by negligence; natural calamities (force majeure) suspend obligations proportionately.</li>
+    <li>Harvest, crop residue, and by-products belong to Lessee unless stated otherwise in this agreement.</li>
+    <li>Early termination only by mutual consent or for material breach with {{ termination_notice_days }} days’ notice if uncured.</li>
+  </ul>
+  {% if additional_clauses %}<p class="muted">{{ additional_clauses }}</p>{% endif %}
+
+  <h2>6) Signatures</h2>
+  <div class="grid">
+    <div class="box signature-block">
+      <div class="sig-line">Lessor Signature</div>
+      <p>Name: {{ lessor.name }} | Date: {{ signature_date }}</p>
+    </div>
+    <div class="box signature-block">
+      <div class="sig-line">Lessee Signature</div>
+      <p>Name: {{ lessee.name }} | Date: {{ signature_date }}</p>
+    </div>
+  </div>
+
+  <h3>Witnesses</h3>
+  <div class="grid">
+    {% for w in witnesses %}
+    <div class="box signature-block">
+      <div class="sig-line">Witness {{ loop.index }} Signature</div>
+      <p>Name: {{ w.name }} | Address: {{ w.address }} | ID: {{ w.id_type }} {{ w.id_number }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</body>
+</html>
+
